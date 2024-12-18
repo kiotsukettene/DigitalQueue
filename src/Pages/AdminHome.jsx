@@ -8,41 +8,77 @@ import { ref, onValue } from 'firebase/database';
 function AdminHome() {
   const [currentQueueNumber, setCurrentQueueNumber] = useState(0);
   const [totalCustomersServed, setTotalCustomersServed] = useState(0);
+  const [hourlyData, setHourlyData] = useState(Array(8).fill(0));
 
-  // Fetch real-time queue data from Firebase
   useEffect(() => {
-    const queueRef = ref(database, 'queue/number');
-    const servedRef = ref(database, 'queue/served');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    const unsubscribeQueue = onValue(queueRef, (snapshot) => {
+    const queueRef = ref(database, 'queue/list');
+    
+    const unsubscribeList = onValue(queueRef, (snapshot) => {
       const data = snapshot.val();
-      if (data !== null) {
-        setCurrentQueueNumber(data);
-      }
+      
+      if (!data) return;
+
+      const hourCounts = Array(8).fill(0);
+      let totalServed = 0;
+      let currentNumber = 0;
+      
+      Object.values(data).forEach(entry => {
+        if (entry.status === 'Complete') {
+          // Parse the timestamp and adjust for timezone
+          const entryDate = new Date(entry.timestamp);
+          const localHour = entryDate.getHours() + 8; // Adjust for timezone difference
+          
+          // Get today's date for comparison
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          // Check if the entry is from today
+          const entryDay = new Date(entryDate);
+          entryDay.setHours(0, 0, 0, 0);
+          
+          if (entryDay.getTime() === today.getTime()) {
+            totalServed++;
+            
+            console.log('Processing entry:', {
+              originalTimestamp: entry.timestamp,
+              localHour: localHour,
+              parsedDate: entryDate.toString()
+            });
+            
+            // Map the hour to the correct slot (8 AM - 3 PM)
+            if (localHour >= 8 && localHour <= 15) {
+              hourCounts[localHour - 8]++;
+            }
+          }
+        }
+
+        const entryNumber = parseInt(entry.number);
+        if (!isNaN(entryNumber) && entryNumber > currentNumber) {
+          currentNumber = entryNumber;
+        }
+      });
+
+      console.log('Final hour counts:', hourCounts);
+
+      setHourlyData(hourCounts);
+      setTotalCustomersServed(totalServed);
+      setCurrentQueueNumber(currentNumber);
     });
 
-    const unsubscribeServed = onValue(servedRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data !== null) {
-        setTotalCustomersServed(data);
-      }
-    });
-
-    return () => {
-      unsubscribeQueue();
-      unsubscribeServed();
-    };
+    return () => unsubscribeList();
   }, []);
 
-  // Chart data
   const dailyChartData = {
     labels: ["8 AM", "9 AM", "10 AM", "11 AM", "12 PM", "1 PM", "2 PM", "3 PM"],
     datasets: [
       {
         label: "Customers Served",
-        data: [5, 10, 8, 7, 12, 15, 18, 20],
-        backgroundColor: "rgb(120, 113, 108)", // Stone-500
-        borderColor: "rgb(87, 83, 78)", // Stone-600
+        data: hourlyData,
+        backgroundColor: "rgb(120, 113, 108)",
+        borderColor: "rgb(87, 83, 78)",
         borderWidth: 1,
       },
     ],
